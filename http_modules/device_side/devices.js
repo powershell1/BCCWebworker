@@ -5,7 +5,7 @@ import { createHmac } from 'crypto';
 import dotenv from 'dotenv';
 dotenv.config();
 
-global.sessions = {};
+global.devices = {};
 
 const router = express.Router();
 expressWs(router);
@@ -19,34 +19,60 @@ const client = new MongoClient(process.env.MONGODB_URI, {
 
 client.connect();
 
-async function getUserDatabases() {
-    await client.connect();
-    const databases = await client.db('Userdata')
-        .collection('Infomation');
+async function getIoTDatabases() {
+    const databases = await client.db('IoT')
+        .collection('IoTList');
     return databases;
 }
 
-router.ws('/session', async (ws, req) => {
-    const { session } = req.headers;
-    if (!session) { return; }
-    const userDatabases = await getUserDatabases();
-    const find = await userDatabases.findOne({
-        session: session
+function sendDeviceState(session, find, state) {
+    if (!global.sessions[session]) { return; }
+    global.sessions[session].forEach(ws => {
+        ws.send(JSON.stringify({
+            type: `device_${state ? "online" : "offline"}`,
+            name: find.name,
+            serial: find._id
+        }));
     });
-    if (!find) { return; }
-    // ws.send(JSON.stringify(ReturnLogin(find)));
-    if (!global.sessions[session]) {
-        global.sessions[session] = [];
+}
+
+router.ws('/', async (ws, req) => {
+    const { serial, password } = req.headers;
+    if (!serial || !password) { return ws.terminate(); }
+    const passwordHash = createHmac('sha256', process.env.PASSWORD_HASH_KEY);
+    const IoTDatabases = await getIoTDatabases();
+    const find = await IoTDatabases.findOne({
+        _id: new ObjectId(serial),
+        password: passwordHash.update(password).digest('hex')
+    });
+    if (!find) { return ws.terminate(); }
+    const session = find.paired;
+    sendDeviceState(session, find, true);
+    if (!global.devices[session]) {
+        global.devices[session] = {};
     }
-    console.log("Hello world!");
-    global.sessions[session].push(ws);
+    if (global.devices[session][serial]) { return ws.terminate(); }
+    global.devices[session][serial] = ws;
     ws.on('close', () => {
-        if (global.sessions[session].length === 1) {
-            delete global.sessions[session];
-            return;
+        sendDeviceState(session, find, false);
+        delete global.devices[session][serial];
+        if (Object.keys(global.devices[session]).length === 0) {
+            delete global.devices[session];
         }
-        global.sessions[session].splice(global.sessions[session].indexOf(ws), 1);
     });
+    var lastPing = Date.now();
+    ws.on('message', (msg) => {
+        if (msg === 'ping') {
+            lastPing = Date.now();
+            return
+        }
+    });
+    const interval = setInterval(() => {
+        if (Date.now() - lastPing > 5000) {
+            ws.terminate();
+            clearInterval(interval);
+        }
+    }, 1000);
 });
 
 export default router;

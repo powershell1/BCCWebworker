@@ -15,8 +15,8 @@ app.use(bodyParser.urlencoded({ extended: true }));
 app.use('/login', login);
 app.use('/devices', devices);
 
-app.get('/', (req, res) => {
-    res.send('Hello World!');
+app.get('/ping', (req, res) => {
+    res.send('pong');
 });
 
 app.listen(80, () => {
