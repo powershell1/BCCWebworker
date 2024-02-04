@@ -36,6 +36,13 @@ function sendDeviceState(session, find, state) {
     });
 }
 
+function sendApplicationSignal(session, state) {
+    if (!global.sessions[session]) { return; }
+    global.sessions[session].forEach(ws => {
+        ws.send(state);
+    });
+}
+
 router.ws('/', async (ws, req) => {
     const { serial, password } = req.headers;
     if (!serial || !password) { return ws.terminate(); }
@@ -66,6 +73,7 @@ router.ws('/', async (ws, req) => {
             lastPing = Date.now();
             return
         }
+        sendApplicationSignal(session, msg);
     });
     const interval = setInterval(() => {
         if (Date.now() - lastPing > 5000) {
